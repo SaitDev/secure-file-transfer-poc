@@ -1,0 +1,39 @@
+name: secure-file-transfer-poc
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_local
+    volumes:
+      - ./runtime/postgres-data:/var/lib/postgresql/data
+      - ./runtime/postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  sftpgo:
+    image: drakkan/sftpgo:v2.7.0
+    restart: unless-stopped
+    ports:
+      - "2022:2022"
+      - "8888:8080"
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      SFTPGO_LOADDATA_FROM: /var/lib/sftpgo/bootstrap/sftpgo-bootstrap.json
+      SFTPGO_LOADDATA_MODE: 0
+      SFTPGO_COMMON__ACTIONS__HOOK: /var/lib/sftpgo/hooks/download-delay-hook.sh
+      SFTPGO_COMMON__ACTIONS__EXECUTE_ON: download
+    volumes:
+      - ./runtime/sftpgo-data:/srv/sftpgo
+      - ./runtime/sftpgo-home:/var/lib/sftpgo
+      - ./generated/sftpgo-bootstrap.json:/var/lib/sftpgo/bootstrap/sftpgo-bootstrap.json:ro
+      - ./sftpgo-hooks:/var/lib/sftpgo/hooks:ro

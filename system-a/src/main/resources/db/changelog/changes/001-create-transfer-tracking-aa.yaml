@@ -1,0 +1,158 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-system-a-transfer-file
+      author: codex
+      changes:
+        - createTable:
+            tableName: transfer_file
+            remarks: Tracks outbound System A transfer lifecycle and response receipt metadata.
+            columns:
+              - column:
+                  name: id
+                  type: UUID
+                  constraints:
+                    primaryKey: true
+                    primaryKeyName: pk_transfer_file
+                    nullable: false
+              - column:
+                  name: batch_id
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: file_id
+                  type: VARCHAR(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: business_date
+                  type: DATE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: batch_number
+                  type: SMALLINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: flow
+                  type: VARCHAR(16)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: source_filename
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: local_path
+                  type: VARCHAR(512)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: remote_path
+                  type: VARCHAR(512)
+              - column:
+                  name: source_size_bytes
+                  type: BIGINT
+              - column:
+                  name: encryption_flag
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: transfer_status
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: batch_size
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: encrypted_at
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: uploaded_at
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: response_filename
+                  type: VARCHAR(255)
+              - column:
+                  name: response_downloaded_at
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: response_download_ack_sent_at
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: retry_count
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_error_code
+                  type: VARCHAR(64)
+              - column:
+                  name: last_error_message
+                  type: VARCHAR(1024)
+        - addUniqueConstraint:
+            tableName: transfer_file
+            columnNames: file_id
+            constraintName: uk_transfer_file_file_id
+        - createIndex:
+            tableName: transfer_file
+            indexName: idx_transfer_file_batch_id
+            columns:
+              - column:
+                  name: batch_id
+        - createIndex:
+            tableName: transfer_file
+            indexName: idx_transfer_file_business_date_batch_number_flow
+            columns:
+              - column:
+                  name: business_date
+              - column:
+                  name: batch_number
+              - column:
+                  name: flow
+        - createIndex:
+            tableName: transfer_file
+            indexName: idx_transfer_file_transfer_status
+            columns:
+              - column:
+                  name: transfer_status
+        - createIndex:
+            tableName: transfer_file
+            indexName: idx_transfer_file_uploaded_at
+            columns:
+              - column:
+                  name: uploaded_at
+        - sql:
+            sql: ALTER TABLE transfer_file ADD CONSTRAINT ck_transfer_file_flow CHECK (flow IN ('A2B', 'B2A'));
+        - sql:
+            sql: ALTER TABLE transfer_file ADD CONSTRAINT ck_transfer_file_batch_number CHECK (batch_number BETWEEN 0 AND 5);
+        - sql:
+            sql: ALTER TABLE transfer_file ADD CONSTRAINT ck_transfer_file_retry_count CHECK (retry_count >= 0);
+        - sql:
+            sql: |
+              ALTER TABLE transfer_file
+              ADD CONSTRAINT ck_transfer_file_transfer_status
+              CHECK (
+                transfer_status IN (
+                  'CREATED',
+                  'ENCRYPTED',
+                  'UPLOADED',
+                  'RESPONSE_DOWNLOADED',
+                  'RESPONSE_DOWNLOAD_ACK_SENT',
+                  'COMPLETED',
+                  'ERROR'
+                )
+              );
