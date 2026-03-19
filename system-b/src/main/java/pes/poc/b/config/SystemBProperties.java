@@ -22,7 +22,8 @@ public class SystemBProperties {
     private String sftpHost = "localhost";
     private int sftpPort = 2022;
     private String sftpUsername = "system-b";
-    private String sftpPassword = "SystemB123!";
+    private String sftpPrivateKeyPath = "../infra/generated/keys/system-b-sftp.key";
+    private String sftpPrivateKeyPassphrase;
     private String remoteRecvDirectory = "/recv";
     private String remoteAckDirectory = "/ack";
     private String remoteSendDirectory = "/send";

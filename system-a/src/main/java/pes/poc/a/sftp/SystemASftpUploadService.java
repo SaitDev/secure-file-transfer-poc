@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.sftp.SFTPClient;
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
+import net.schmizz.sshj.userauth.keyprovider.KeyProvider;
 import pes.poc.a.scheduling.SystemAProperties;
 
 @Service
@@ -25,7 +26,8 @@ public class SystemASftpUploadService {
         try (SSHClient sshClient = new SSHClient()) {
             sshClient.addHostKeyVerifier(new PromiscuousVerifier());
             sshClient.connect(systemAProperties.getSftpHost(), systemAProperties.getSftpPort());
-            sshClient.authPassword(systemAProperties.getSftpUsername(), systemAProperties.getSftpPassword());
+            KeyProvider keyProvider = loadKeyProvider(sshClient);
+            sshClient.authPublickey(systemAProperties.getSftpUsername(), keyProvider);
 
             try (SFTPClient sftpClient = sshClient.newSFTPClient()) {
                 // SFTPGo users only have upload/rename permission, so avoid post-upload chmod/mtime sync.
@@ -37,5 +39,13 @@ public class SystemASftpUploadService {
         }
 
         return remoteFile;
+    }
+
+    private KeyProvider loadKeyProvider(SSHClient sshClient) throws IOException {
+        String privateKeyPassphrase = systemAProperties.getSftpPrivateKeyPassphrase();
+        if (privateKeyPassphrase == null || privateKeyPassphrase.isBlank()) {
+            return sshClient.loadKeys(systemAProperties.getSftpPrivateKeyPath());
+        }
+        return sshClient.loadKeys(systemAProperties.getSftpPrivateKeyPath(), privateKeyPassphrase);
     }
 }

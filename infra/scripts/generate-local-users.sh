@@ -7,13 +7,12 @@ infra_dir="$(cd "${script_dir}/.." && pwd)"
 generated_dir="${infra_dir}/generated"
 runtime_dir="${infra_dir}/runtime"
 bootstrap_file="${generated_dir}/sftpgo-bootstrap.json"
+keys_dir="${generated_dir}/keys"
 
 admin_username="local-admin"
 admin_password="LocalAdmin123!"
 system_a_username="system-a"
-system_a_password="SystemA123!"
 system_b_username="system-b"
-system_b_password="SystemB123!"
 system_a_postgres_db="system_a_transfer"
 system_a_postgres_user="system_a_user"
 system_a_postgres_password="system_a_pass_local"
@@ -25,8 +24,18 @@ postgres_port="5432"
 postgres_admin_db="postgres"
 postgres_admin_user="postgres"
 postgres_admin_password="postgres_local"
+system_a_private_key="${keys_dir}/system-a-sftp.key"
+system_a_public_key="${system_a_private_key}.pub"
+system_b_private_key="${keys_dir}/system-b-sftp.key"
+system_b_public_key="${system_b_private_key}.pub"
+
+if ! command -v ssh-keygen >/dev/null 2>&1; then
+    echo "ssh-keygen is required to generate local SFTP key pairs" >&2
+    exit 1
+fi
 
 mkdir -p "${generated_dir}"
+mkdir -p "${keys_dir}"
 mkdir -p "${runtime_dir}/sftpgo-data/exchange/a2b/outbox"
 mkdir -p "${runtime_dir}/sftpgo-data/exchange/a2b/download-ack"
 mkdir -p "${runtime_dir}/sftpgo-data/exchange/b2a/outbox"
@@ -36,6 +45,12 @@ mkdir -p "${runtime_dir}/sftpgo-home"
 mkdir -p "${runtime_dir}/sftpgo-home/bootstrap"
 mkdir -p "${runtime_dir}/postgres-data"
 mkdir -p "${runtime_dir}/postgres-init"
+
+rm -f "${system_a_private_key}" "${system_a_public_key}" "${system_b_private_key}" "${system_b_public_key}"
+ssh-keygen -q -t ed25519 -N "" -C "${system_a_username}@local-sftpgo" -f "${system_a_private_key}" >/dev/null
+ssh-keygen -q -t ed25519 -N "" -C "${system_b_username}@local-sftpgo" -f "${system_b_private_key}" >/dev/null
+system_a_public_key_value="$(<"${system_a_public_key}")"
+system_b_public_key_value="$(<"${system_b_public_key}")"
 
 cat > "${runtime_dir}/postgres-init/01-init-app-databases.sql" <<EOF
 CREATE USER ${system_a_postgres_user} WITH ENCRYPTED PASSWORD '${system_a_postgres_password}';
@@ -51,9 +66,11 @@ cat > "${generated_dir}/local-users.env" <<EOF
 SFTPGO_ADMIN_USERNAME=${admin_username}
 SFTPGO_ADMIN_PASSWORD=${admin_password}
 SYSTEM_A_SFTP_USERNAME=${system_a_username}
-SYSTEM_A_SFTP_PASSWORD=${system_a_password}
+SYSTEM_A_SFTP_PRIVATE_KEY_PATH=${system_a_private_key}
+SYSTEM_A_SFTP_PRIVATE_KEY_PASSPHRASE=
 SYSTEM_B_SFTP_USERNAME=${system_b_username}
-SYSTEM_B_SFTP_PASSWORD=${system_b_password}
+SYSTEM_B_SFTP_PRIVATE_KEY_PATH=${system_b_private_key}
+SYSTEM_B_SFTP_PRIVATE_KEY_PASSPHRASE=
 POSTGRES_ADMIN_HOST=${postgres_host}
 POSTGRES_ADMIN_PORT=${postgres_port}
 POSTGRES_ADMIN_DB=${postgres_admin_db}
@@ -137,7 +154,7 @@ cat > "${bootstrap_file}" <<EOF
     {
       "status": 1,
       "username": "${system_a_username}",
-      "password": "${system_a_password}",
+      "public_keys": ["${system_a_public_key_value}"],
       "home_dir": "/srv/sftpgo/data/${system_a_username}",
       "permissions": {
         "/": ["list"],
@@ -172,7 +189,7 @@ cat > "${bootstrap_file}" <<EOF
     {
       "status": 1,
       "username": "${system_b_username}",
-      "password": "${system_b_password}",
+      "public_keys": ["${system_b_public_key_value}"],
       "home_dir": "/srv/sftpgo/data/${system_b_username}",
       "permissions": {
         "/": ["list"],
@@ -209,7 +226,7 @@ cat > "${bootstrap_file}" <<EOF
 EOF
 
 cat > "${generated_dir}/local-users.txt" <<EOF
-Local SFTPGo credentials
+Local access details
 ========================
 
 Admin UI
@@ -217,15 +234,17 @@ Admin UI
 username: ${admin_username}
 password: ${admin_password}
 
-System A
---------
+System A SFTP
+-------------
 username: ${system_a_username}
-password: ${system_a_password}
+private key: ${system_a_private_key}
+public key: ${system_a_public_key}
 
-System B
---------
+System B SFTP
+-------------
 username: ${system_b_username}
-password: ${system_b_password}
+private key: ${system_b_private_key}
+public key: ${system_b_public_key}
 
 PostgreSQL - System A
 ---------------------
@@ -255,4 +274,5 @@ EOF
 printf 'Generated %s\n' "${generated_dir}/local-users.env"
 printf 'Generated %s\n' "${generated_dir}/local-users.txt"
 printf 'Generated %s\n' "${bootstrap_file}"
+printf 'Generated %s and %s\n' "${system_a_private_key}" "${system_b_private_key}"
 printf 'Prepared runtime directories under %s\n' "${runtime_dir}"

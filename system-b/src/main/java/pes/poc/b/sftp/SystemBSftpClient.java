@@ -14,6 +14,7 @@ import net.schmizz.sshj.SSHClient;
 import net.schmizz.sshj.sftp.RemoteResourceInfo;
 import net.schmizz.sshj.sftp.SFTPClient;
 import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
+import net.schmizz.sshj.userauth.keyprovider.KeyProvider;
 import pes.poc.b.config.SystemBProperties;
 import pes.poc.b.transfer.InboundTransferFile;
 import pes.poc.b.transfer.InboundTransferFileName;
@@ -69,8 +70,17 @@ public class SystemBSftpClient {
         SSHClient sshClient = new SSHClient();
         sshClient.addHostKeyVerifier(new PromiscuousVerifier());
         sshClient.connect(systemBProperties.getSftpHost(), systemBProperties.getSftpPort());
-        sshClient.authPassword(systemBProperties.getSftpUsername(), systemBProperties.getSftpPassword());
+        KeyProvider keyProvider = loadKeyProvider(sshClient);
+        sshClient.authPublickey(systemBProperties.getSftpUsername(), keyProvider);
         return sshClient;
+    }
+
+    private KeyProvider loadKeyProvider(SSHClient sshClient) throws IOException {
+        String privateKeyPassphrase = systemBProperties.getSftpPrivateKeyPassphrase();
+        if (privateKeyPassphrase == null || privateKeyPassphrase.isBlank()) {
+            return sshClient.loadKeys(systemBProperties.getSftpPrivateKeyPath());
+        }
+        return sshClient.loadKeys(systemBProperties.getSftpPrivateKeyPath(), privateKeyPassphrase);
     }
 
     private String buildRemotePath(String directory, String fileName) {
