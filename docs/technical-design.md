@@ -37,13 +37,13 @@ The solution consists of main components:
 
 The detailed process flow starts when the scheduler in System A triggers a batch job. System A then generates and encrypts a CSV file, uploads it to SFTPGo, and persists the transfer details in the database for tracking and audit purposes.
 
-System B polls SFTPGo, downloads the encrypted file, stores it durably, and uploads a download acknowledgment file. Once the download is completed, the SFTPGo hook starts immediately. After waiting 2 minutes, SFTPGo checks whether the matching download acknowledgment file has been received and deletes the transferred file only when the acknowledgment is present.
+System B polls SFTPGo, downloads the encrypted file, stores it durably, and uploads a download acknowledgment file. Once the download is completed, the SFTPGo hook starts a delayed cleanup check. If the matching acknowledgment arrives later, the ACK upload also starts the same delayed cleanup check. After waiting 2 minutes from either trigger, SFTPGo deletes the transferred file only when both the original file and the matching acknowledgment file are present.
 
 System B then decrypts and processes the file, generates a result file, and uploads the result file back to SFTPGo.
 
-System A polls SFTPGo for the result file, downloads it, stores it locally, and uploads a response download acknowledgment. Once the result file download is completed, the same SFTPGo hook starts immediately and performs the delayed cleanup check after 2 minutes.
+System A polls SFTPGo for the result file, downloads it, stores it locally, and uploads a response download acknowledgment. The same delayed cleanup approach applies to the response flow: the download event starts a delayed cleanup check, and a late ACK upload starts another delayed cleanup check for the same file pair.
 
-[![](https://mermaid.ink/img/pako:eNqVVF1vmzAU_SuWn9No-SKEh0qQbH3Yh7qxbtLEi4NviFewmW26tlH--y5fAZKo0njC3HPPPcfH-EBjxYF61MCfAmQMG8ESzbJIEnxypq2IRc6kJT5hhoQvxkJG_MtyWJU_fL-_U5fFoNcbXJY3Vf1eGZtoCL9-imSN8W9ub32PhPEeeJGCJlaLJAFtyJbZeE9-q-0AeAcSNLNA1uGPQeG9jPVLboffQ4885KlinEBdBl4CyE6k0KE2AQqwSgMOZ9LsUAUHy0RqCJOcFDWDsTi2lZ0qlaObNCU7pYmQW1UgsqMtn6AWsN5D_NhBVMpB1yCQvOULbxAcnFz0ZBL2hErYtmVuWDfqr3zTWDAw1qFqTlRy8toY65E3e8bbGf76Yyv0i8K9V0_YhrifTFgyJZmQhQXTOqn1QQqINKrQMXRDkYmIHcnKbIVMqjU8C2NNOyCoN2IDdZxlU65VDMZcMfeQ8_IsNICSUIMpUnvNTV1pSK6lOAC0Ifr9EBGRK2ngzRTxLH7rmM7j88_iuxg6PJC9cj8n_9xZLes_A6MjmmjBqWd1ASOagc5YuaSHsjWidg8ZRNTDV870Y0QjecQe_J9_KZW1bVoVyZ56O5YaXBVVIs0Nc_qqcZNAr_EPsNRzZhUH9Q70mXqT1XLsOsulu5y6rrNYLEb0hXrzseNMnJk7d6eLhbtyZscRfa2GvhuvJpMVdi2nznS-clbYAFzgbn2ub7nqsjv-A3qMlDA?type=png)](https://mermaid.ai/live/edit#pako:eNqVVF1vmzAU_SuWn9No-SKEh0qQbH3Yh7qxbtLEi4NviFewmW26tlH--y5fAZKo0njC3HPPPcfH-EBjxYF61MCfAmQMG8ESzbJIEnxypq2IRc6kJT5hhoQvxkJG_MtyWJU_fL-_U5fFoNcbXJY3Vf1eGZtoCL9-imSN8W9ub32PhPEeeJGCJlaLJAFtyJbZeE9-q-0AeAcSNLNA1uGPQeG9jPVLboffQ4885KlinEBdBl4CyE6k0KE2AQqwSgMOZ9LsUAUHy0RqCJOcFDWDsTi2lZ0qlaObNCU7pYmQW1UgsqMtn6AWsN5D_NhBVMpB1yCQvOULbxAcnFz0ZBL2hErYtmVuWDfqr3zTWDAw1qFqTlRy8toY65E3e8bbGf76Yyv0i8K9V0_YhrifTFgyJZmQhQXTOqn1QQqINKrQMXRDkYmIHcnKbIVMqjU8C2NNOyCoN2IDdZxlU65VDMZcMfeQ8_IsNICSUIMpUnvNTV1pSK6lOAC0Ifr9EBGRK2ngzRTxLH7rmM7j88_iuxg6PJC9cj8n_9xZLes_A6MjmmjBqWd1ASOagc5YuaSHsjWidg8ZRNTDV870Y0QjecQe_J9_KZW1bVoVyZ56O5YaXBVVIs0Nc_qqcZNAr_EPsNRzZhUH9Q70mXqT1XLsOsulu5y6rrNYLEb0hXrzseNMnJk7d6eLhbtyZscRfa2GvhuvJpMVdi2nznS-clbYAFzgbn2ub7nqsjv-A3qMlDA)
+[![](https://mermaid.ink/img/pako:eNqtVE1z2jAQ_SsanUmmkGCMD5kx0ObQj0nrpp3pcBHWYlRkyZXkNITJf-_awrENNNNDffHHvn37dt9ae5pqDjSiFn6VoFJYCJYZli8VwatgxolUFEw5EhNmSbKzDnISn4aTOvzu692tPg3OOrmz0_Cijt9p6zIDyecPS-Ux8cXNTRyRJN0ALyUY4ozIMjCWrJhLN-SnXvWAt6DAMAdknnzrBd6q1OwK1_-eROS-kJpxAj4MvAKQtZDQohYzFOC0ASzOlF2jCg6OCWkJU5yUnsE6LNvIlloX2I2UZK0NEWqlS0S2tNU18wLmG0i3LURLDsaDQPGGL7lA8Oyli45Mwh5QCVs1zAfWhf6tXm0s8bjEoQnYjmQ7hKQSmCoLstF629K1_bdkvjQKfhnJof-OhsNoeSMlnr9v-vmk0SL9gGmI-86EIyOSC1U6sD15fjh5ZbVQ2RFVB7cACchodWlSaMUhjIh1fYNHYZ1t6s_8OBfgl6LCFkanYG1nRE3v9wWvNuoAqHQYsKV055r1kQPJuV3oAZpViLvdIqLQysKru4Ab_aVlOl6C-GgJTor-o_v97e-wdN2Ojwfg1f9H2__Ceep_V-FZ_-mAZkZwGjlTwoDmYHJWvdJ9RbekbgM5LGmEj5yZ7ZIu1TPm4BH1Q-u8STO6zDY0WjNp8a2s1-NwaL58NegYmDn-1I5GwaTmoNGePtJoOJ1chsFkEk5GYRiMx-MB3dHo-jIIhsFVeB2OxuNwGlw9D-hTXfTN5XQ4nGLWZBSMrqfBFBOAC_Tkoz-46_P7-Q-_Odfn?type=png)](https://mermaid.ai/live/edit#pako:eNqtVE1z2jAQ_SsanUmmkGCMD5kx0ObQj0nrpp3pcBHWYlRkyZXkNITJf-_awrENNNNDffHHvn37dt9ae5pqDjSiFn6VoFJYCJYZli8VwatgxolUFEw5EhNmSbKzDnISn4aTOvzu692tPg3OOrmz0_Cijt9p6zIDyecPS-Ux8cXNTRyRJN0ALyUY4ozIMjCWrJhLN-SnXvWAt6DAMAdknnzrBd6q1OwK1_-eROS-kJpxAj4MvAKQtZDQohYzFOC0ASzOlF2jCg6OCWkJU5yUnsE6LNvIlloX2I2UZK0NEWqlS0S2tNU18wLmG0i3LURLDsaDQPGGL7lA8Oyli45Mwh5QCVs1zAfWhf6tXm0s8bjEoQnYjmQ7hKQSmCoLstF629K1_bdkvjQKfhnJof-OhsNoeSMlnr9v-vmk0SL9gGmI-86EIyOSC1U6sD15fjh5ZbVQ2RFVB7cACchodWlSaMUhjIh1fYNHYZ1t6s_8OBfgl6LCFkanYG1nRE3v9wWvNuoAqHQYsKV055r1kQPJuV3oAZpViLvdIqLQysKru4Ab_aVlOl6C-GgJTor-o_v97e-wdN2Ojwfg1f9H2__Ceep_V-FZ_-mAZkZwGjlTwoDmYHJWvdJ9RbekbgM5LGmEj5yZ7ZIu1TPm4BH1Q-u8STO6zDY0WjNp8a2s1-NwaL58NegYmDn-1I5GwaTmoNGePtJoOJ1chsFkEk5GYRiMx-MB3dHo-jIIhsFVeB2OxuNwGlw9D-hTXfTN5XQ4nGLWZBSMrqfBFBOAC_Tkoz-46_P7-Q-_Odfn)
 
 ## Security Design
 
@@ -65,7 +65,7 @@ Only encrypted business files should be stored on `SFTPGo`. System B may store t
 
 Secrets such as SFTP credentials, SSH keys, encryption passphrases, and database passwords must not be hardcoded in source code or committed to the repository.
 
-## Error and Exception Handling
+## Edge case and Exception Handling
 
 ### Upload Failure
 
@@ -79,9 +79,15 @@ If System B downloads a file but cannot store it durably, it must not upload the
 
 If the matching download acknowledgment file is not available when the SFTPGo hook checks after 2 minutes, no file is deleted. The source file remains on the server for later handling.
 
+### Late ACK File
+
+If System B uploads the download acknowledgment file after the original 2-minute download-triggered check has already run, the ACK upload must start another delayed cleanup check. After waiting 2 minutes from the ACK upload event, SFTPGo checks again for the matching source file and deletes both files if they are still present.
+
+This allows the design to handle temporary delays such as database slowness, network delay, transient SFTP reconnect issues, or short operational backlog without leaving the file permanently orphaned on the server.
+
 ### Processing Failure
 
-If System B cannot decrypt or process the file successfully, the processing result should be recorded and a failure result file can be returned to System A if required by the agreed flow.
+If System B cannot decrypt or process the file successfully, it retries processing based on the current POC configuration. The current implementation allows up to `10` total processing attempts with a `5` minute delay between retries. If processing still fails after the final attempt, the transfer is marked as failed and a failure result file can be returned to System A.
 
 ### Duplicate File
 

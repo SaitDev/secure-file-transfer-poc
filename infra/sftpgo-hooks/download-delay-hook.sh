@@ -9,21 +9,24 @@ action="${SFTPGO_ACTION:-}"
 status="${SFTPGO_ACTION_STATUS:-0}"
 path="${SFTPGO_ACTION_PATH:-}"
 
-if [ "${action}" != "download" ]; then
-  exit 0
-fi
-
 if [ "${status}" != "1" ]; then
   exit 0
 fi
 
-case "${path}" in
-  "${hooks_root}"/exchange/a2b/outbox/*|"${hooks_root}"/exchange/b2a/outbox/*)
+should_run=0
+
+case "${action}:${path}" in
+  download:"${hooks_root}"/exchange/a2b/outbox/*|download:"${hooks_root}"/exchange/b2a/outbox/*)
+    should_run=1
     ;;
-  *)
-    exit 0
+  upload:"${hooks_root}"/exchange/a2b/download-ack/*.download.ack|upload:"${hooks_root}"/exchange/b2a/download-ack/*.download.ack)
+    should_run=1
     ;;
 esac
+
+if [ "${should_run}" != "1" ]; then
+    exit 0
+fi
 
 (
   SFTPGO_HOOKS_ROOT="${hooks_root}" exec "${worker}" "${path}" "120"

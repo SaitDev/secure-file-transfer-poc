@@ -31,7 +31,7 @@ services:
       SFTPGO_LOADDATA_FROM: /var/lib/sftpgo/bootstrap/sftpgo-bootstrap.json
       SFTPGO_LOADDATA_MODE: 0
       SFTPGO_COMMON__ACTIONS__HOOK: /var/lib/sftpgo/hooks/download-delay-hook.sh
-      SFTPGO_COMMON__ACTIONS__EXECUTE_ON: download
+      SFTPGO_COMMON__ACTIONS__EXECUTE_ON: download,upload
     volumes:
       - ./runtime/sftpgo-data:/srv/sftpgo
       - ./runtime/sftpgo-home:/var/lib/sftpgo
