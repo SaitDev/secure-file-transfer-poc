@@ -45,7 +45,7 @@ public class InboundTransferPersistenceService {
     private final TransferPayloadRepository transferPayloadRepository;
     private final TransferEventRepository transferEventRepository;
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public PersistedInboundTransfer recordDownloadedTransfer(
             InboundTransferFile inboundFile,
             Path localFile,
@@ -67,6 +67,7 @@ public class InboundTransferPersistenceService {
         transferFile.setStorageStatus(STATUS_DOWNLOADED);
         transferFile.setDownloadedAt(eventTime);
         transferFile.setProcessingStatus(PROCESSING_PENDING);
+        transferFile.setNextProcessingAttemptAt(null);
         transferFile.setLastErrorCode(null);
         transferFile.setLastErrorMessage(null);
         transferFile = transferFileRepository.save(transferFile);
@@ -89,6 +90,27 @@ public class InboundTransferPersistenceService {
         transferBatchRepository.save(batch);
 
         return new PersistedInboundTransfer(transferFile.getId(), transferFile.getCorrelationId());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public PersistedInboundTransfer recordDownloadedTransferAndAcknowledge(
+            InboundTransferFile inboundFile,
+            Path localFile,
+            String sourceChecksum,
+            ZonedDateTime downloadedAt,
+            String ackFileName,
+            ZonedDateTime acknowledgedAt,
+            Runnable ackUploadAction
+    ) throws IOException {
+        PersistedInboundTransfer persistedTransfer = recordDownloadedTransfer(
+                inboundFile,
+                localFile,
+                sourceChecksum,
+                downloadedAt
+        );
+        ackUploadAction.run();
+        markDownloadAcknowledged(persistedTransfer.transferId(), ackFileName, acknowledgedAt);
+        return persistedTransfer;
     }
 
     @Transactional
@@ -145,6 +167,7 @@ public class InboundTransferPersistenceService {
                 .orElseThrow(() -> new IllegalStateException("Transfer file not found for id " + transferId));
 
         transferFile.setProcessingStatus(STATUS_PROCESSING);
+        transferFile.setNextProcessingAttemptAt(null);
         transferFile.setLastErrorCode(null);
         transferFile.setLastErrorMessage(null);
         transferFileRepository.save(transferFile);
@@ -164,6 +187,7 @@ public class InboundTransferPersistenceService {
 
         transferFile.setProcessingStatus(STATUS_PROCESSED_SUCCESS);
         transferFile.setProcessedAt(eventTime);
+        transferFile.setNextProcessingAttemptAt(null);
         transferFile.setLastErrorCode(null);
         transferFile.setLastErrorMessage(null);
         transferFileRepository.save(transferFile);
@@ -181,12 +205,52 @@ public class InboundTransferPersistenceService {
     }
 
     @Transactional
-    public void markProcessingFailed(UUID transferId, String errorCode, String errorMessage, ZonedDateTime failedAt) {
+    public void markProcessingRetryScheduled(
+            UUID transferId,
+            String errorCode,
+            String errorMessage,
+            ZonedDateTime failedAt,
+            ZonedDateTime nextAttemptAt
+    ) {
+        OffsetDateTime eventTime = failedAt.toOffsetDateTime();
+        TransferFileEntity transferFile = transferFileRepository.findById(transferId)
+                .orElseThrow(() -> new IllegalStateException("Transfer file not found for id " + transferId));
+
+        transferFile.setProcessingStatus(PROCESSING_PENDING);
+        transferFile.setProcessedAt(null);
+        transferFile.setNextProcessingAttemptAt(nextAttemptAt.toOffsetDateTime());
+        transferFile.setRetryCount(transferFile.getRetryCount() + 1);
+        transferFile.setLastErrorCode(errorCode);
+        transferFile.setLastErrorMessage(truncate(errorMessage, 1024));
+        transferFileRepository.save(transferFile);
+
+        TransferBatchEntity batch = transferFile.getBatch();
+        batch.setStatus(STATUS_PROCESSING);
+        transferBatchRepository.save(batch);
+
+        recordEvent(
+                transferFile,
+                "PROCESSING_RETRY_SCHEDULED",
+                eventTime,
+                "retryCount=%d,nextProcessingAttemptAt=%s,errorCode=%s,message=%s".formatted(
+                        transferFile.getRetryCount(),
+                        nextAttemptAt,
+                        errorCode,
+                        truncate(errorMessage, 1024)
+                )
+        );
+    }
+
+    @Transactional
+    public void markProcessingFailedFinal(UUID transferId, String errorCode, String errorMessage, ZonedDateTime failedAt) {
         OffsetDateTime eventTime = failedAt.toOffsetDateTime();
         TransferFileEntity transferFile = transferFileRepository.findById(transferId)
                 .orElseThrow(() -> new IllegalStateException("Transfer file not found for id " + transferId));
 
         transferFile.setProcessingStatus(STATUS_PROCESSED_FAILED);
+        transferFile.setProcessedAt(eventTime);
+        transferFile.setNextProcessingAttemptAt(null);
+        transferFile.setRetryCount(transferFile.getRetryCount() + 1);
         transferFile.setLastErrorCode(errorCode);
         transferFile.setLastErrorMessage(truncate(errorMessage, 1024));
         transferFileRepository.save(transferFile);
@@ -199,7 +263,11 @@ public class InboundTransferPersistenceService {
                 transferFile,
                 STATUS_PROCESSED_FAILED,
                 eventTime,
-                "errorCode=%s,message=%s".formatted(errorCode, truncate(errorMessage, 1024))
+                "retryCount=%d,errorCode=%s,message=%s".formatted(
+                        transferFile.getRetryCount(),
+                        errorCode,
+                        truncate(errorMessage, 1024)
+                )
         );
     }
 
@@ -239,6 +307,29 @@ public class InboundTransferPersistenceService {
         );
     }
 
+    @Transactional
+    public boolean purgeEncryptedPayload(UUID transferId, ZonedDateTime purgedAt) {
+        TransferFileEntity transferFile = transferFileRepository.findById(transferId)
+                .orElseThrow(() -> new IllegalStateException("Transfer file not found for id " + transferId));
+        TransferPayloadEntity payload = transferPayloadRepository.findById(transferId).orElse(null);
+
+        if (payload == null) {
+            return false;
+        }
+
+        transferPayloadRepository.delete(payload);
+        recordEvent(
+                transferFile,
+                "PAYLOAD_PURGED",
+                purgedAt.toOffsetDateTime(),
+                "contentSizeBytes=%d,contentChecksum=%s".formatted(
+                        payload.getContentSizeBytes(),
+                        payload.getContentChecksum()
+                )
+        );
+        return true;
+    }
+
     private TransferBatchEntity findOrCreateBatch(LocalDate businessDate, OffsetDateTime scheduledAt) {
         return transferBatchRepository.findByBusinessDateAndBatchNumberAndFlow(
                 businessDate,
@@ -266,6 +357,7 @@ public class InboundTransferPersistenceService {
         transferFile.setStorageBackend(STORAGE_BACKEND);
         transferFile.setStorageStatus(STATUS_DOWNLOADED);
         transferFile.setProcessingStatus(PROCESSING_PENDING);
+        transferFile.setNextProcessingAttemptAt(null);
         transferFile.setRetryCount(0);
         return transferFile;
     }

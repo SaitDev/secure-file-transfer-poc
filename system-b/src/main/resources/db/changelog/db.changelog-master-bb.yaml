@@ -3,3 +3,5 @@ databaseChangeLog:
       file: db/changelog/changes/001-initial-transfer-schema-bb.yaml
   - include:
       file: db/changelog/changes/002-customer-import-schema-bb.yaml
+  - include:
+      file: db/changelog/changes/003-processing-retry-policy-bb.yaml

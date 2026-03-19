@@ -74,6 +74,9 @@ public class TransferFileEntity {
     @Column(name = "processed_at")
     private OffsetDateTime processedAt;
 
+    @Column(name = "next_processing_attempt_at")
+    private OffsetDateTime nextProcessingAttemptAt;
+
     @Column(name = "retry_count", nullable = false)
     private int retryCount;
 

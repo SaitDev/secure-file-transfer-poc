@@ -1,0 +1,17 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-add-next-processing-attempt-at
+      author: codex
+      changes:
+        - addColumn:
+            tableName: transfer_file
+            columns:
+              - column:
+                  name: next_processing_attempt_at
+                  type: TIMESTAMP WITH TIME ZONE
+        - createIndex:
+            tableName: transfer_file
+            indexName: idx_transfer_file_next_processing_attempt_at
+            columns:
+              - column:
+                  name: next_processing_attempt_at

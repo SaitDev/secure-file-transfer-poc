@@ -1,6 +1,7 @@
 package pes.poc.b.processing;
 
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Arrays;
@@ -10,6 +11,7 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -41,6 +43,8 @@ public class InboundTransferProcessingService {
     private static final String ERROR_CODE_RESPONSE_UPLOAD = "OUTBOUND_RESULT_UPLOAD_FAILED";
     private static final String RESULT_STATUS_SUCCESS = "SUCCESS";
     private static final String RESULT_STATUS_FAILED = "FAILED";
+    private static final int MAX_TRANSFERS_PER_RUN = 20;
+    private static final int MIN_RETRY_DELAY_MINUTES = 5;
 
     private final SystemBProperties systemBProperties;
     private final TransferFileRepository transferFileRepository;
@@ -54,10 +58,15 @@ public class InboundTransferProcessingService {
     private final TransactionTemplate transactionTemplate;
 
     public int processPendingTransfers() {
+        validateRetryPolicy();
+
         List<TransferFileEntity> pendingTransfers = transferFileRepository
-                .findTop20ByStorageStatusAndProcessingStatusInOrderByDownloadedAtAscIdAsc(
+                .findEligibleForProcessing(
                         STORAGE_STATUS_READY,
-                        List.of(PROCESSING_PENDING, PROCESSING_SUCCESS, PROCESSING_FAILED)
+                        List.of(PROCESSING_SUCCESS, PROCESSING_FAILED),
+                        PROCESSING_PENDING,
+                        now().toOffsetDateTime(),
+                        PageRequest.of(0, MAX_TRANSFERS_PER_RUN)
                 );
 
         int processedCount = 0;
@@ -100,6 +109,7 @@ public class InboundTransferProcessingService {
             customerRecords = parseCustomers(decryptedBytes);
             importCustomers(transferId, customerRecords, startedAt.toOffsetDateTime());
             inboundTransferPersistenceService.markProcessingSucceeded(transferId, customerRecords.size(), now());
+            purgeEncryptedPayload(transferId, transferFile.getSourceFilename());
 
             uploadSuccessResult(transferFile, customerRecords.size(), "Imported successfully");
             log.info(
@@ -110,9 +120,31 @@ public class InboundTransferProcessingService {
             return true;
         } catch (IllegalStateException exception) {
             String errorCode = resolveErrorCode(exception);
-            inboundTransferPersistenceService.markProcessingFailed(transferId, errorCode, exception.getMessage(), now());
-            uploadFailureResult(transferFile, customerRecords == null ? 0 : customerRecords.size(), exception.getMessage());
-            log.warn("Inbound processing failed for {}: {}", transferFile.getSourceFilename(), exception.getMessage());
+            ZonedDateTime failedAt = now();
+            if (hasRemainingAttempts(transferFile)) {
+                ZonedDateTime nextAttemptAt = failedAt.plus(retryDelayMinutes(), ChronoUnit.MINUTES);
+                inboundTransferPersistenceService.markProcessingRetryScheduled(
+                        transferId,
+                        errorCode,
+                        exception.getMessage(),
+                        failedAt,
+                        nextAttemptAt
+                );
+                log.warn(
+                        "Inbound processing attempt {} failed for {}. Next retry scheduled at {}",
+                        transferFile.getRetryCount() + 1,
+                        transferFile.getSourceFilename(),
+                        nextAttemptAt
+                );
+            } else {
+                inboundTransferPersistenceService.markProcessingFailedFinal(transferId, errorCode, exception.getMessage(), failedAt);
+                uploadFailureResult(transferFile, customerRecords == null ? 0 : customerRecords.size(), exception.getMessage());
+                log.warn(
+                        "Inbound processing reached max attempts ({}) for {}",
+                        systemBProperties.getProcessingMaxAttempts(),
+                        transferFile.getSourceFilename()
+                );
+            }
             return false;
         } finally {
             if (decryptedBytes != null) {
@@ -160,6 +192,7 @@ public class InboundTransferProcessingService {
 
     private boolean uploadOutstandingResult(TransferFileEntity transferFile) {
         if (PROCESSING_SUCCESS.equals(transferFile.getProcessingStatus())) {
+            purgeEncryptedPayload(transferFile.getId(), transferFile.getSourceFilename());
             long importedCount = customerRepository.countBySourceTransferId(transferFile.getId());
             uploadSuccessResult(transferFile, Math.toIntExact(importedCount), "Imported successfully");
             return true;
@@ -254,6 +287,35 @@ public class InboundTransferProcessingService {
             return stageException.errorCode();
         }
         return ERROR_CODE_DECRYPT;
+    }
+
+    private boolean hasRemainingAttempts(TransferFileEntity transferFile) {
+        return transferFile.getRetryCount() + 1 < systemBProperties.getProcessingMaxAttempts();
+    }
+
+    private int retryDelayMinutes() {
+        return systemBProperties.getProcessingRetryDelayMinutes();
+    }
+
+    private void validateRetryPolicy() {
+        if (systemBProperties.getProcessingMaxAttempts() < 1) {
+            throw new IllegalStateException("system-b.processing-max-attempts must be at least 1");
+        }
+        if (retryDelayMinutes() < MIN_RETRY_DELAY_MINUTES) {
+            throw new IllegalStateException(
+                    "system-b.processing-retry-delay-minutes must be at least " + MIN_RETRY_DELAY_MINUTES
+            );
+        }
+    }
+
+    private void purgeEncryptedPayload(UUID transferId, String sourceFileName) {
+        try {
+            if (inboundTransferPersistenceService.purgeEncryptedPayload(transferId, now())) {
+                log.info("Purged encrypted payload from DB for {}", sourceFileName);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Failed to purge encrypted payload from DB for {}", sourceFileName, exception);
+        }
     }
 
     private ZonedDateTime now() {

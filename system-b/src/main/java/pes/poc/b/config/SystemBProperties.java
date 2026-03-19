@@ -15,6 +15,8 @@ public class SystemBProperties {
     private String pollMainCron = "0 * 9,10 * * *";
     private String pollEndCron = "0 0-15 11 * * *";
     private String processingCron = "20 * * * * *";
+    private int processingMaxAttempts = 10;
+    private int processingRetryDelayMinutes = 5;
     private String stagingDirectory = "build/generated/inbound/staging";
     private String receiptDirectory = "build/generated/inbound/receipts";
     private String sftpHost = "localhost";

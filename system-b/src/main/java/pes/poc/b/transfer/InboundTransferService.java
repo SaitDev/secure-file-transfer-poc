@@ -69,20 +69,16 @@ public class InboundTransferService {
 
             String sha256 = sha256ChecksumService.calculate(localFile);
             ZonedDateTime downloadedAt = ZonedDateTime.now(ZoneId.of(systemBProperties.getZone()));
-            persistedTransfer = inboundTransferPersistenceService.recordDownloadedTransfer(
+            String ackContent = downloadAckFileContentFactory.create(inboundFile.fileName(), downloadedAt, sha256);
+            String ackFileName = inboundFile.fileName().downloadAckFileName();
+            persistedTransfer = inboundTransferPersistenceService.recordDownloadedTransferAndAcknowledge(
                     inboundFile,
                     localFile,
                     sha256,
-                    downloadedAt
-            );
-            String ackContent = downloadAckFileContentFactory.create(inboundFile.fileName(), downloadedAt, sha256);
-            String ackFileName = inboundFile.fileName().downloadAckFileName();
-
-            systemBSftpClient.uploadAckFile(ackFileName, ackContent);
-            inboundTransferPersistenceService.markDownloadAcknowledged(
-                    persistedTransfer.transferId(),
+                    downloadedAt,
                     ackFileName,
-                    ZonedDateTime.now(ZoneId.of(systemBProperties.getZone()))
+                    ZonedDateTime.now(ZoneId.of(systemBProperties.getZone())),
+                    () -> systemBSftpClient.uploadAckFile(ackFileName, ackContent)
             );
             transferReceiptStore.markAcknowledged(inboundFile.fileName(), localFile, downloadedAt, sha256);
 
